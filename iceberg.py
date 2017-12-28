@@ -21,7 +21,7 @@ import PIL
 class IcebergDataset(Dataset):
     """Iceberg dataset."""
 
-    def __init__(self, dtpath, offset, length, transform=None):
+    def __init__(self, dtpath, offset, length, transform=None, test=False):
         """
         dtpath: file path for input data
         offset: offset of the data set
@@ -31,6 +31,7 @@ class IcebergDataset(Dataset):
         self.data = dataframe.iloc[offset:offset+length]
         self.length = length
         self.transform = transform
+        self.test = test
 
     def __len__(self):
         return self.length
@@ -49,7 +50,9 @@ class IcebergDataset(Dataset):
         if (self.transform):
             sample['img'] = self.transform(sample['img'])
         
-        sample['label'] = row['is_iceberg']
+        if not self.test:
+            sample['label'] = row['is_iceberg']
+            
         sample['id'] = row['id']
         sample['angle'] = str(row['inc_angle'])
         return sample
@@ -108,10 +111,10 @@ class Iceberg:
         self.model = model
         self.optim = optim
         self.nepoch = nepoch
+        self.bsize = bsize
         
         # member to initialize
         self.epoch = 0
-        self.bsize = bsize
         self.train_btime = AverageMeter()
         self.train_dtime = AverageMeter()
         self.train_loss = AverageMeter()
@@ -127,7 +130,7 @@ class Iceberg:
             cp = torch.load(self.cppath)
             self.model.load_state_dict(cp[MODEL_STORE_KEY])
             self.optim.load_state_dict(cp[OPTIM_STORE_KEY])
-            self.epoch = cp[EPOCH_KEY] + 1
+            self.epoch = cp[EPOCH_KEY]
             print("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
             
     def store(self):
@@ -163,7 +166,43 @@ class Iceberg:
             self.store()
     
     def infer(self, ttpath):
-        pass
+        
+        self.model.eval()
+        
+        df = pd.read_json(ttpath)
+        length = df.shape[0]
+        test_dataset = IcebergDataset(ttpath, 0, length, transforms.Compose([
+            transforms.Resize(256),
+            transforms.RandomCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor()]), True)
+        test_loader = DataLoader(test_dataset, batch_size=self.bsize, shuffle=False,
+            num_workers=0, pin_memory=True, sampler=None)
+        
+        for crop in range(10):
+            directory = self.cppath[:-4]
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            path = os.path.join(directory, "crop"+str(crop)+".csv")
+            df = pd.DataFrame(columns=["id", "is_iceberg"])
+            with open(path, 'w') as f:
+                df.to_csv(f, index=False)
+                
+            for i_batch, sample_batched in enumerate(test_loader):
+                var_images = torch.autograd.Variable(sample_batched['img'].cuda())
+                logits = self.model(var_images)
+                softmax = nn.Softmax(dim=1)
+                props = softmax(logits)[:,1].data
+                ids = sample_batched['id']
+                df = pd.DataFrame({
+                    'id': ids,
+                    'is_iceberg': props.cpu()
+                })
+                with open(path, 'a') as f:
+                    df.to_csv(f, index=False, header=False)
+                
+                print('Crop: [{0}][{1}/{2}]'.format(
+                       crop, i_batch, len(test_loader)))
     
     def train(self):
         
