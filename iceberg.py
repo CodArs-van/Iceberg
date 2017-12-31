@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import os
 import time
+import logging
 
 import pandas as pd
 import PIL
@@ -119,19 +120,39 @@ class Iceberg:
         self.train_dtime = AverageMeter()
         self.train_loss = AverageMeter()
         self.train_top1 = AverageMeter()
-        self.train_top5 = AverageMeter()
+        self.train_top2 = AverageMeter()
+        
+        self.valid_btime = AverageMeter()
+        self.valid_loss = AverageMeter()
+        self.valid_top1 = AverageMeter()
+        self.valid_top2 = AverageMeter()
         
         # other initilization
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.DEBUG)
+        directory = self.cppath[:-4]
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        logpath = os.path.join(directory, 'stdout.log')
+        
+        fileHandler = logging.FileHandler(logpath)
+        self.logger.addHandler(fileHandler)
+        
+        consoleHandler = logging.StreamHandler()
+        self.logger.addHandler(consoleHandler)
+        
         self.resume()
         
     def resume(self):
         if os.path.isfile(self.cppath):
-            print("=> loading checkpoint '{}'".format(self.cppath))
+            # print("=> loading checkpoint '{}'".format(self.cppath))
+            self.logger.info("=> loading checkpoint '{}'".format(self.cppath))
             cp = torch.load(self.cppath)
             self.model.load_state_dict(cp[MODEL_STORE_KEY])
             self.optim.load_state_dict(cp[OPTIM_STORE_KEY])
             self.epoch = cp[EPOCH_KEY]
-            print("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
+            # print("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
+            self.logger.info("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
             
     def store(self):
         state = {
@@ -167,6 +188,7 @@ class Iceberg:
     
     def infer(self, ttpath):
         
+        # switch to eval mode
         self.model.eval()
         
         df = pd.read_json(ttpath)
@@ -201,7 +223,11 @@ class Iceberg:
                 with open(path, 'a') as f:
                     df.to_csv(f, index=False, header=False)
                 
+                """
                 print('Crop: [{0}][{1}/{2}]'.format(
+                       crop, i_batch, len(test_loader)))
+                """
+                self.logger.info('Crop: [{0}][{1}/{2}]'.format(
                        crop, i_batch, len(test_loader)))
     
     def train(self):
@@ -218,11 +244,11 @@ class Iceberg:
             logits = self.model(var_images)
             loss = self.criterion(logits, var_target)
         
-            prec1, prec5 = self.accuracy(logits.data, tensor_target, topk=(1, 5))
+            prec1, prec2 = self.accuracy(logits.data, tensor_target, topk=(1, 2))
             batch_size = sample_batched['label'].size(0)
             self.train_loss.update(loss.data[0], batch_size)
             self.train_top1.update(prec1[0], batch_size)
-            self.train_top5.update(prec5[0], batch_size)
+            self.train_top2.update(prec2[0], batch_size)
         
             self.optim.zero_grad()
             loss.backward()
@@ -232,17 +258,65 @@ class Iceberg:
             end = time.time()
         
             if i_batch % 1 == 0:
+                """
                 print('Epoch: [{0}][{1}/{2}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
                        self.epoch, i_batch, len(self.train_loader),
                        batch_time=self.train_btime, loss=self.train_loss,
-                       top1=self.train_top1, top5=self.train_top5))
+                       top1=self.train_top1, top2=self.train_top2))
+                """
+                self.logger.info('Epoch: [{0}][{1}/{2}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
+                       self.epoch, i_batch, len(self.train_loader),
+                       batch_time=self.train_btime, loss=self.train_loss,
+                       top1=self.train_top1, top2=self.train_top2))
     
     def validate(self):
-        pass
+        
+        # switch to eval mode
+        self.model.eval()
+        
+        end = time.time()
+        for i_batch, sample_batched in enumerate(self.valid_loader):
+            """Start batch validation"""
+            var_images = torch.autograd.Variable(sample_batched['img'].cuda())
+            tensor_target = sample_batched['label'].cuda()
+            var_target = torch.autograd.Variable(tensor_target)
+            logits = self.model(var_images)
+            loss = self.criterion(logits, var_target)
+
+            prec1, prec2 = self.accuracy(logits.data, tensor_target, topk=(1, 2))
+            batch_size = sample_batched['label'].size(0)
+            self.valid_loss.update(loss.data[0], batch_size)
+            self.valid_top1.update(prec1[0], batch_size)
+            self.valid_top2.update(prec2[0], batch_size)
+
+            self.valid_btime.update(time.time() - end)
+            end = time.time()
+
+            if i_batch % 1 == 0:
+                """
+                print('Validate: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
+                       i_batch, len(self.valid_loader), batch_time=self.valid_btime, 
+                       loss=self.valid_loss, top1=self.valid_top1, top2=self.valid_top2))
+                """
+                self.logger.info('Validate: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
+                       i_batch, len(self.valid_loader), batch_time=self.valid_btime, 
+                       loss=self.valid_loss, top1=self.valid_top1, top2=self.valid_top2))
     
     def accuracy(self, output, target, topk=(1,)):
         """Computes the precision@k for the specified values of k"""
