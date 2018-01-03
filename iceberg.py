@@ -145,13 +145,11 @@ class Iceberg:
         
     def resume(self):
         if os.path.isfile(self.cppath):
-            # print("=> loading checkpoint '{}'".format(self.cppath))
             self.logger.info("=> loading checkpoint '{}'".format(self.cppath))
             cp = torch.load(self.cppath)
             self.model.load_state_dict(cp[MODEL_STORE_KEY])
             self.optim.load_state_dict(cp[OPTIM_STORE_KEY])
             self.epoch = cp[EPOCH_KEY]
-            # print("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
             self.logger.info("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
             
     def store(self):
@@ -223,10 +221,6 @@ class Iceberg:
                 with open(path, 'a') as f:
                     df.to_csv(f, index=False, header=False)
                 
-                """
-                print('Crop: [{0}][{1}/{2}]'.format(
-                       crop, i_batch, len(test_loader)))
-                """
                 self.logger.info('Crop: [{0}][{1}/{2}]'.format(
                        crop, i_batch, len(test_loader)))
     
@@ -258,16 +252,6 @@ class Iceberg:
             end = time.time()
         
             if i_batch % 1 == 0:
-                """
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
-                       self.epoch, i_batch, len(self.train_loader),
-                       batch_time=self.train_btime, loss=self.train_loss,
-                       top1=self.train_top1, top2=self.train_top2))
-                """
                 self.logger.info('Epoch: [{0}][{1}/{2}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
@@ -301,15 +285,6 @@ class Iceberg:
             end = time.time()
 
             if i_batch % 1 == 0:
-                """
-                print('Validate: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
-                       i_batch, len(self.valid_loader), batch_time=self.valid_btime, 
-                       loss=self.valid_loss, top1=self.valid_top1, top2=self.valid_top2))
-                """
                 self.logger.info('Validate: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
