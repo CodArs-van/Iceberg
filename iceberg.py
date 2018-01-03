@@ -43,10 +43,13 @@ class IcebergDataset(Dataset):
         band_1 = np.array(row['band_1']).reshape(75, 75).astype(np.float32)
         band_2 = np.array(row['band_2']).reshape(75, 75).astype(np.float32)
         band_3 = band_1 - band_2
+        
         r = (band_1 - band_1.min()) / (band_1.max() - band_1.min())
         g = (band_2 - band_2.min()) / (band_2.max() - band_2.min())
         b = (band_3 - band_3.min()) / (band_3.max() - band_3.min())
+        
         sample['img'] = np.stack((r, g, b), axis=2)
+        sample['img'] = (sample['img'] * 255).astype('uint8')
         sample['img'] = PIL.Image.fromarray(sample['img'], 'RGB')
         if (self.transform):
             sample['img'] = self.transform(sample['img'])
