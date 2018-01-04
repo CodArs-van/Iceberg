@@ -98,6 +98,7 @@ class AverageMeter(object):
 MODEL_STORE_KEY = 'model_state_dict'
 OPTIM_STORE_KEY = 'optim_state_dict'
 EPOCH_KEY = 'epoch'
+BESTP1 = 'p1'
 
 class Iceberg:
     
@@ -133,9 +134,7 @@ class Iceberg:
         # other initilization
         self.logger = logging.getLogger()
         self.logger.setLevel(logging.DEBUG)
-        directory = self.cppath[:-4]
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        directory = self.getDirPath(self.cppath)
         logpath = os.path.join(directory, 'stdout.log')
         
         fileHandler = logging.FileHandler(logpath)
@@ -143,6 +142,8 @@ class Iceberg:
         
         consoleHandler = logging.StreamHandler()
         self.logger.addHandler(consoleHandler)
+        
+        self.p1best = 0.0
         
         self.resume()
         
@@ -153,15 +154,17 @@ class Iceberg:
             self.model.load_state_dict(cp[MODEL_STORE_KEY])
             self.optim.load_state_dict(cp[OPTIM_STORE_KEY])
             self.epoch = cp[EPOCH_KEY]
+            self.p1best = cp[BESTP1]
             self.logger.info("=> loaded checkpoint '{}' (epoch {})".format(self.cppath, self.epoch))
             
-    def store(self):
+    def store(self, path):
         state = {
             EPOCH_KEY: self.epoch,
             MODEL_STORE_KEY: self.model.state_dict(),
-            OPTIM_STORE_KEY: self.optim.state_dict()
+            OPTIM_STORE_KEY: self.optim.state_dict(),
+            BESTP1: self.p1best
         }
-        torch.save(state, self.cppath)
+        torch.save(state, path)
     
     def run(self, transform=None):
         """run the training and validate process"""
@@ -184,8 +187,15 @@ class Iceberg:
             # evaluate on validation set
             p1 = self.validate()
             
+            # save best model
+            if p1 > self.p1best:
+                self.p1best = p1
+                directory = self.getDirPath(self.cppath)
+                path = os.path.join(directory, 'best.pth')
+                self.store(path)
+            
             # save check point
-            self.store()
+            self.store(self.cppath)
     
     def infer(self, ttpath):
         
@@ -203,9 +213,7 @@ class Iceberg:
             num_workers=0, pin_memory=True, sampler=None)
         
         for crop in range(10):
-            directory = self.cppath[:-4]
-            if not os.path.exists(directory):
-                os.makedirs(directory)
+            directory = self.getDirPath(self.cppath)
             path = os.path.join(directory, "crop"+str(crop)+".csv")
             df = pd.DataFrame(columns=["id", "is_iceberg"])
             with open(path, 'w') as f:
@@ -258,11 +266,10 @@ class Iceberg:
                 self.logger.info('Epoch: [{0}][{1}/{2}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                        self.epoch, i_batch, len(self.train_loader),
                        batch_time=self.train_btime, loss=self.train_loss,
-                       top1=self.train_top1, top2=self.train_top2))
+                       top1=self.train_top1))
     
     def validate(self):
         
@@ -291,10 +298,11 @@ class Iceberg:
                 self.logger.info('Validate: [{0}/{1}]\t'
                       'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@2 {top2.val:.3f} ({top2.avg:.3f})'.format(
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                        i_batch, len(self.valid_loader), batch_time=self.valid_btime, 
-                       loss=self.valid_loss, top1=self.valid_top1, top2=self.valid_top2))
+                       loss=self.valid_loss, top1=self.valid_top1))
+        
+        return self.valid_top1.avg
     
     def accuracy(self, output, target, topk=(1,)):
         """Computes the precision@k for the specified values of k"""
@@ -310,3 +318,9 @@ class Iceberg:
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
+    
+    def getDirPath(self, cppath):
+        directory = self.cppath[:-4]
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        return directory
