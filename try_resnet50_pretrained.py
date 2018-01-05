@@ -2,16 +2,25 @@ from models.resnet import resnet50
 from iceberg import *
 from torch.optim import SGD
 
-lr = 0.0005
-mom = 0.9
-wd = 1e-4
-bsize = 256
+import argparse
 
-model = resnet50(True)
+parser = argparse.ArgumentParser()
+parser.add_argument('--lr', required=True)
+parser.add_argument('--mt', required=True)
+parser.add_argument('--wd', required=True)
+parser.add_argument('--bs', type=int, required=True)
+results = parser.parse_args()
+
+lr = results.lr
+mom = results.mt
+wd = results.wd
+bsize = results.bs
+
+model = resnet50(True, num_classes=2)
 model = torch.nn.DataParallel(model).cuda()
-optim = SGD(model.parameters(), lr, momentum=mom, weight_decay=wd)
+optim = SGD(model.parameters(), float(lr), momentum=float(mom), weight_decay=float(wd))
 iceberg = Iceberg('./data/train.json', 
-                  './data/resnet50_lr5e-4_mom9e-1_wd1e-4_bs{}_pretrained_model.pth'.format(bsize), model, optim, 10000, bsize)
+                  './data/resnet50_lr{}_mom{}_wd{}_bs{}_pretrained_model.pth'.format(lr, mom, wd, bsize), model, optim, 128, bsize)
 iceberg.run(transforms.Compose([
             transforms.Resize(256),
             transforms.RandomCrop(224),

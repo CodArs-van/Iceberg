@@ -182,7 +182,15 @@ def resnet50(pretrained=False, **kwargs):
     """
     model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet50']))
+        state_dict = model_zoo.load_url(model_urls['resnet50'])
+        skip_list = ['fc.bias', 'fc.weight']
+        for name, param in state_dict.items():
+            if name in skip_list:
+                continue
+            if isinstance(param, nn.Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            model.state_dict()[name].copy_(param)
     return model
 
 
